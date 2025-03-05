@@ -108,6 +108,18 @@ fee_chain = ConversationChain(
     memory=fee_memory
 )
 
+#defining redis index for storing metedata
+redis_config_v2 = RedisConfig(
+    index_name="mpnet_v16",
+    redis_url=redis_url,  # Update Redis URL
+    metadata_schema=[
+        {"name": "table_name", "type": "tag"},
+        {"name": "column_name", "type": "text"},
+        {"name": "column_desc", "type": "text"}
+    ],
+    embedding_field="embedding_v16",
+    embedding_field_dtype="float32"
+)
 
 metadata_for_rds_tbl =[
     {'table_name': 'rds_table1',
@@ -127,6 +139,129 @@ metadata_for_rds_tbl =[
                         {'column_name': 'col4', 'column_desc': 'col4 desc},
                         {'column_name': 'col5', 'column_desc': 'col5 desc}]},
 ]
+
+
+
+# function to retrieve table name from VectorStore
+def query_main_index(query_text: str, k: int):
+    # Initialize embeddings model and RedisVectorStore for the main index
+    hf_embeddings = HuggingFaceEmbeddings(model_name="all-mpnet-base-v2")
+    vector_store_main = RedisVectorStore(embeddings=hf_embeddings, config=redis_config_v2)
+    
+    # Perform similarity search to find relevant table
+    table_results = vector_store_main.similarity_search(query_text, k=k)
+    # print(table_results)
+
+    table_names = []
+    for doc in table_results:
+        table = {}
+        table['table_name'] = doc.metadata['table_name']
+        table['column_names'] = doc.metadata['columns']
+        table_names.append(table)
+    return table_names
+
+
+# function to retrieve column names from table
+def query_columns_for_table(table_name: str, query_text: str):
+    """
+    Queries the Redis vector store to retrieve column details for a specific table based on a given query.
+
+    This function uses an embeddings model to perform similarity searches on a vector store. 
+    It filters results to only include columns associated with the specified table name and retrieves metadata 
+    such as column names and descriptions.
+
+    Args:
+        table_name (str): The name of the table to filter the column search.
+        query_text (str): The query string to match columns based on similarity.
+
+    Returns:
+        tuple: A tuple containing:
+            - columns (list): A list of column names that match the query.
+            - column_details (list): A list of dictionaries, where each dictionary contains:
+                - 'column_name': The name of the column.
+                - 'column_desc': The description of the column.
+              Returns an empty list and `None` if an exception occurs.
+
+    """
+    try:
+        # Initialize the HuggingFace embeddings model
+        hf_embeddings = HuggingFaceEmbeddings(model_name="all-mpnet-base-v2")
+        
+        # Initialize the Redis vector store with the embeddings model and configuration
+        vector_store_v2 = RedisVectorStore(embeddings=hf_embeddings, config=redis_config_v2)
+        
+        # Define the filter condition to match the specified table name
+        filter_condition = Tag("table_name") == table_name
+        
+        # Perform a similarity search with the query text and filter condition
+        column_results = vector_store_v2.similarity_search(query_text, filter=filter_condition, k=15)
+        
+        # Initialize lists to store column names and details
+        columns = []
+        column_details = []
+        
+        # Extract column metadata from the search results
+        for column_doc in column_results:
+            column_detail = {
+                'column_name': column_doc.metadata.get('column_name'),
+                'column_desc': column_doc.metadata.get('column_desc')
+            }
+            columns.append(column_doc.metadata.get('column_name'))
+            column_details.append(column_detail)
+        
+        return columns, column_details
+
+    except Exception as e:
+        return [], None
+
+
+def table_metadata(query, k):
+    """
+    Retrieves metadata for tables based on a query, including column names and details.
+
+    This function first queries the main index to get a list of table names matching the query. 
+    For each table, it fetches associated column names and their details using the 
+    `query_columns_for_table` function. The result is a list of dictionaries containing 
+    table names, column names, and column details.
+
+    Args:
+        query (str): The query string to match tables and their metadata.
+        k (int): The number of top matching tables to retrieve.
+
+    Returns:
+        list: A list of dictionaries where each dictionary contains:
+            - 'table_name': The name of the table.
+            - 'column_names': A list of column names associated with the table.
+            - 'column_details': A list of dictionaries, each containing:
+                - 'column_name': The name of the column.
+                - 'column_desc': The description of the column.
+    """
+    result = []  # Initialize the result list to store table metadata
+
+    # Query the main index to get a list of table names matching the query
+    table_names = query_main_index(query, k)
+    
+    # Iterate over each table retrieved from the main index
+    for table in table_names:
+        print(table)  # Debugging: Print the table information
+        
+        # Fetch columns and column details for the table
+        columns, column_details = query_columns_for_table(table['table_name'], query)
+        print("columns", columns)  # Debugging: Print the retrieved columns
+        
+        # If columns exist, add them to the table dictionary
+        if columns:
+            table['column_names'] = columns
+            table['column_details'] = column_details
+        
+        # Append the updated table dictionary to the result list
+        result.append(table)
+    
+    return result
+
+
+
+
 
 def execute_query(sql_query):
     """
