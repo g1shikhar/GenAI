@@ -23,12 +23,10 @@ from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import ConversationChain
 from langchain_aws import ChatBedrock
 import re
-import pyodbc
 import boto3
 from datetime import datetime
 from decimal import Decimal
 import time
-import advisor_utils_copy as au
 from langchain_openai import ChatOpenAI
 
 pd.set_option("display.max_columns",100)
@@ -75,6 +73,8 @@ def bedrock_llm(model_id=BEDROCK_MODEL_ID):
         region_name="us-east-1"
     )
     return llm
+
+llm_claude = bedrock_llm()
 
 
 # OPENAI LLM
